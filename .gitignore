@@ -1,0 +1,4 @@
+tracker.db
+.secret_key
+__pycache__/
+*.pyc

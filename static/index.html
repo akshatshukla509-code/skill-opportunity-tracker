@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Skill & Opportunity Tracker</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1d2433;--mu:#6b7385;--ac:#3b5bdb;--ok:#2f9e44;--bad:#d6336c;--bd:#e3e6ee}
+@media(prefers-color-scheme:dark){:root{--bg:#12141b;--card:#1b1f2a;--tx:#e8eaf0;--mu:#98a0b3;--ac:#7c93ff;--ok:#51cf66;--bad:#ff6b9a;--bd:#2d3342}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:var(--card);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+header h1{font-size:17px;margin:0;flex:1}nav{display:flex;gap:4px;flex-wrap:wrap;width:100%}
+nav button{background:none;border:0;padding:6px 10px;border-radius:8px;color:var(--mu);cursor:pointer;font:inherit}
+nav button.on{background:var(--ac);color:#fff}
+main{max-width:980px;margin:0 auto;padding:16px}
+h2{margin:0;font-size:20px}.bar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}.bar h2{flex:1}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px}
+.card h3{margin:0 0 4px;font-size:16px}.muted{color:var(--mu);font-size:13px}
+.row{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center}
+button,select,input,textarea{font:inherit;color:var(--tx)}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:7px 12px;cursor:pointer}
+button.ghost{background:none;border:1px solid var(--bd);color:var(--tx)}button.danger{color:var(--bad)}
+input,select,textarea{width:100%;padding:8px;border:1px solid var(--bd);border-radius:8px;background:var(--card)}
+.bar input,.bar select{width:auto;flex:0 1 160px}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--bd)}
+.pill.bad{background:var(--bad);color:#fff}.pill.ok{background:var(--ok);color:#fff}
+.prog{height:10px;background:var(--bd);border-radius:6px;overflow:hidden;margin:6px 0}.prog i{display:block;height:100%;background:var(--ok)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.stat b{font-size:26px;display:block}.empty,.errbox{text-align:center;padding:32px;border:2px dashed var(--bd);border-radius:12px;color:var(--mu)}
+.errbox{border-color:var(--bad);color:var(--bad)}
+dialog{border:0;border-radius:14px;padding:18px;width:min(460px,94vw);background:var(--card);color:var(--tx)}
+dialog::backdrop{background:#0008}label{display:block;margin-top:10px;font-size:13px;color:var(--mu)}
+.fe,.err{color:var(--bad);font-size:12px}pre{white-space:pre-wrap;background:var(--card);border:1px solid var(--bd);padding:14px;border-radius:12px}
+#auth{max-width:380px;margin:8vh auto;padding:0 16px}li.ms{list-style:none;display:flex;gap:8px;align-items:center;padding:3px 0}li.ms input{width:auto}
+ul{padding:0;margin:8px 0}#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:8px 16px;border-radius:99px;display:none}
+</style></head><body>
+<div id="auth" hidden>
+  <div class="card"><h2 id="atitle">Sign in</h2>
+  <p class="muted">Use sample data only. Never enter real passwords you use elsewhere.</p>
+  <form id="af"><div id="nameWrap" hidden><label>Full name<input name="name"></label></div>
+  <label>Email<input name="email" type="email" required></label>
+  <label>Password (8+ characters)<input name="password" type="password" required></label>
+  <div class="err" id="aerr"></div>
+  <div class="row"><button>Continue</button><button type="button" class="ghost" id="swap">Create account</button></div></form></div>
+</div>
+<div id="app" hidden>
+  <header><h1>🎯 Skill &amp; Opportunity Tracker</h1><span class="muted" id="who"></span><button class="ghost" id="out">Log out</button><nav id="nav"></nav></header>
+  <main id="main"></main>
+</div>
+<dialog id="dlg"></dialog><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s), main=$('#main');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const link=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`:'';
+// ---- API helper: every call goes through here so errors are handled uniformly ----
+async function api(path,method='GET',body){
+  const r=await fetch('/api'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const d=r.status===204?null:await r.json().catch(()=>null);
+  if(r.status===401&&!path.startsWith('/log')&&!path.startsWith('/reg')){showAuth();throw new Error('Please sign in')}
+  if(!r.ok){const e=new Error(d?.error||'Request failed');e.fields=d?.fields||{};throw e}
+  return d;
+}
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2200)}
+const loading=()=>main.innerHTML='<p class="muted">Loading…</p>';
+function showErr(el,e,retry){el.innerHTML=`<div class="errbox">⚠ ${esc(e.message)}<br><br><button id="retry">Retry</button></div>`;$('#retry').onclick=retry}
+// ---- generic modal form with per-field server errors ----
+function form(title,fields,vals,onSave){
+  const d=$('#dlg');
+  const inp=([n,l,t,o])=>`<label>${l}`+(t==='select'?`<select name="${n}">${o.map(x=>`<option ${vals[n]==x?'selected':''}>${x}</option>`).join('')}</select>`
+    :t==='textarea'?`<textarea name="${n}" rows="3">${esc(vals[n])}</textarea>`:`<input name="${n}" type="${t}" value="${esc(vals[n])}">`)+`</label><span class="fe" data-f="${n}"></span>`;
+  d.innerHTML=`<form id="f"><h3>${title}</h3>${fields.map(inp).join('')}<div class="err" id="ferr"></div><div class="row"><button>Save</button><button type="button" class="ghost" id="cx">Cancel</button></div></form>`;
+  d.showModal();$('#cx').onclick=()=>d.close();
+  $('#f').onsubmit=async ev=>{ev.preventDefault();document.querySelectorAll('.fe').forEach(x=>x.textContent='');$('#ferr').textContent='';
+    const data={};fields.forEach(([n])=>data[n]=$('#f').elements[n].value);
+    try{await onSave(data);d.close()}catch(e){$('#ferr').textContent=e.message;for(const[k,m]of Object.entries(e.fields||{})){const s=document.querySelector(`.fe[data-f="${k}"]`);if(s)s.textContent=m}}};
+}
+// ---- config for the three simple CRUD sections ----
+const CFG={
+ skills:{title:'Skills',search:1,empty:'No skills yet. Add your first skill with a proficiency level to start your profile.',
+  fields:[['name','Skill name','text'],['level','Proficiency (1-5)','number'],['tags','Tags (comma separated)','text']],
+  card:s=>`<h3>${esc(s.name)}</h3><span class="pill">Level ${s.level}/5</span><div class="prog"><i style="width:${s.level*20}%"></i></div><div class="muted">${esc(s.tags)}</div>`},
+ projects:{title:'Projects',search:1,empty:'No projects yet. Add a project with its GitHub link to showcase your work.',
+  fields:[['title','Title','text'],['description','Description','textarea'],['tech_stack','Technology stack','text'],['github_url','GitHub link','url'],['demo_url','Demo link (optional)','url']],
+  card:p=>`<h3>${esc(p.title)}</h3><div class="muted">${esc(p.tech_stack)}</div><p>${esc(p.description)}</p>${link(p.github_url,'GitHub')} ${link(p.demo_url,'Demo')}`},
+ certificates:{title:'Certificates',search:1,empty:'No certificates yet. Add one with issuer and date.',
+  fields:[['title','Title','text'],['issuer','Issuer','text'],['issue_date','Issue date','date'],['credential_url','Credential link (optional)','url']],
+  card:c=>`<h3>${esc(c.title)}</h3><div class="muted">${esc(c.issuer)} · ${esc(c.issue_date)}</div>${link(c.credential_url,'Credential')}`}
+};
+async function crudView(key){
+  const c=CFG[key];
+  main.innerHTML=`<div class="bar"><h2>${c.title}</h2><input id="q" placeholder="Search…"><button id="add">+ Add</button></div><div id="list"></div>`;
+  const load=async()=>{const L=$('#list');L.innerHTML='<p class="muted">Loading…</p>';
+    try{const items=await api(`/${key}?q=${encodeURIComponent($('#q').value)}`);
+      L.innerHTML=items.length?`<div class="grid">${items.map(i=>`<div class="card">${c.card(i)}<div class="row"><button class="ghost" data-e="${i.id}">Edit</button><button class="ghost danger" data-d="${i.id}">Delete</button></div></div>`).join('')}</div>`
+        :`<div class="empty">${$('#q').value?'No matches for your search.':c.empty}</div>`;
+      L.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{const it=items.find(x=>x.id==b.dataset.e);form('Edit',c.fields,it,async d=>{await api(`/${key}/${it.id}`,'PATCH',d);toast('Saved');load()})});
+      L.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{if(confirm('Delete this item?')){await api(`/${key}/${b.dataset.d}`,'DELETE');toast('Deleted');load()}});
+    }catch(e){showErr(L,e,load)}};
+  $('#add').onclick=()=>form('Add',c.fields,{level:3},async d=>{await api('/'+key,'POST',d);toast('Added');load()});
+  let t;$('#q').oninput=()=>{clearTimeout(t);t=setTimeout(load,250)};load();
+}
+// ---- dashboard ----
+const oppRow=o=>`<li>${esc(o.title)} <span class="muted">· ${esc(o.organization)} · ${esc(o.deadline)}</span> ${o.overdue?'<span class="pill bad">Overdue</span>':`<span class="pill">${o.days_left}d left</span>`}</li>`;
+async function dashboard(){
+  loading();
+  try{const d=await api('/dashboard'),c=d.counts,total=Object.values(c).reduce((a,b)=>a+b,0)-c.overdue;
+    const st=(n,l)=>`<div class="card stat"><b>${n}</b>${l}</div>`;
+    main.innerHTML=`<div class="bar"><h2>Dashboard</h2></div>
+    ${total===0?`<div class="empty" style="margin-bottom:16px"><b>Welcome! 👋</b><br>Start by adding a skill, a project, then set a learning goal and save an opportunity.<br><br><button id="go">Add my first skill</button></div>`:''}
+    <div class="stats">${st(c.skills,'Skills')+st(c.projects,'Projects')+st(c.certificates,'Certificates')+st(c.goals,'Goals')+st(c.opportunities,'Opportunities')+st(c.overdue,'Overdue')}</div>
+    <div class="grid"><div class="card"><h3>Upcoming deadlines (30 days)</h3>${d.upcoming.length?`<ul>${d.upcoming.map(oppRow).join('')}</ul>`:'<p class="muted">Nothing due soon.</p>'}
+      ${d.overdue.length?`<h3 style="color:var(--bad)">Overdue</h3><ul>${d.overdue.map(oppRow).join('')}</ul>`:''}</div>
+    <div class="card"><h3>Goal progress</h3>${d.goals.length?d.goals.map(g=>`<div>${esc(g.title)} <span class="muted">${g.progress}%</span><div class="prog"><i style="width:${g.progress}%"></i></div></div>`).join(''):'<p class="muted">No goals yet.</p>'}</div>
+    <div class="card"><h3>Recent activity</h3>${d.activity.length?`<ul>${d.activity.map(a=>`<li class="muted">${esc(a.text)} · ${esc(a.at.replace('T',' ').slice(0,16))}</li>`).join('')}</ul>`:'<p class="muted">No activity yet.</p>'}</div></div>`;
+    if($('#go'))$('#go').onclick=()=>nav('skills');
+  }catch(e){showErr(main,e,dashboard)}
+}
+// ---- goals with milestone checkboxes ----
+async function goals(){
+  main.innerHTML=`<div class="bar"><h2>Learning goals</h2><button id="add">+ New goal</button></div><div id="list"></div>`;
+  const load=async()=>{const L=$('#list');L.innerHTML='<p class="muted">Loading…</p>';
+    try{const gs=await api('/goals');
+      L.innerHTML=gs.length?`<div class="grid">${gs.map(g=>`<div class="card"><h3>${esc(g.title)}</h3><div class="muted">Target ${esc(g.target_date)} · ${g.done}/${g.total} milestones</div>
+        <div class="prog"><i style="width:${g.progress}%"></i></div><b>${g.progress}%</b>
+        <ul>${g.milestones.map(m=>`<li class="ms"><label style="margin:0"><input type="checkbox" data-m="${m.id}" ${m.done?'checked':''}> ${esc(m.title)}</label></li>`).join('')}</ul>
+        <div class="row"><input data-nm="${g.id}" placeholder="New milestone" style="flex:1"><button class="ghost" data-am="${g.id}">Add</button><button class="ghost danger" data-dg="${g.id}">Delete goal</button></div></div>`).join('')}</div>`
+        :'<div class="empty">No learning goals yet. Create a goal and break it into milestones to track progress.</div>';
+      L.querySelectorAll('[data-m]').forEach(cb=>cb.onchange=async()=>{try{await api('/milestones/'+cb.dataset.m,'PATCH',{done:cb.checked});load()}catch(e){toast(e.message);load()}});
+      L.querySelectorAll('[data-am]').forEach(b=>b.onclick=async()=>{const v=L.querySelector(`[data-nm="${b.dataset.am}"]`).value;try{await api(`/goals/${b.dataset.am}/milestones`,'POST',{title:v});load()}catch(e){toast(e.message)}});
+      L.querySelectorAll('[data-dg]').forEach(b=>b.onclick=async()=>{if(confirm('Delete this goal?')){await api('/goals/'+b.dataset.dg,'DELETE');load()}});
+    }catch(e){showErr(L,e,load)}};
+  $('#add').onclick=()=>form('New goal',[['title','Goal','text'],['target_date','Target date','date'],['ms','Milestones (one per line)','textarea']],{},async d=>{
+    await api('/goals','POST',{title:d.title,target_date:d.target_date,milestones:d.ms.split('\n').map(s=>s.trim()).filter(Boolean)});toast('Goal created');load()});
+  load();
+}
+// ---- opportunities with filters / sorting / status ----
+const TYPES=['Internship','Hackathon','Workshop','Course'],STATUS=['Saved','Applied','Interview','Completed','Rejected'];
+const OPP=[['title','Title','text'],['organization','Organization','text'],['type','Type','select',TYPES],['deadline','Deadline','date'],['link','Link (optional)','url']];
+async function opps(){
+  const opt=(a,all)=>`<option value="">${all}</option>`+a.map(x=>`<option>${x}</option>`).join('');
+  main.innerHTML=`<div class="bar"><h2>Opportunities</h2><select id="ft">${opt(TYPES,'All types')}</select><select id="fs">${opt(STATUS,'All statuses')}</select>
+   <select id="so"><option value="deadline">Soonest deadline</option><option value="-deadline">Latest deadline</option><option value="status">Status</option><option value="created">Newest</option></select>
+   <label style="margin:0"><input type="checkbox" id="ov" style="width:auto"> Overdue only</label><button id="add">+ Add</button></div><div id="list"></div>`;
+  const load=async()=>{const L=$('#list');L.innerHTML='<p class="muted">Loading…</p>';
+    const qs=new URLSearchParams({type:$('#ft').value,status:$('#fs').value,sort:$('#so').value,overdue:$('#ov').checked?1:''});
+    try{const os=await api('/opportunities?'+qs);
+      L.innerHTML=os.length?`<div class="grid">${os.map(o=>`<div class="card"><h3>${esc(o.title)}</h3><div class="muted">${esc(o.organization)} · ${esc(o.type)}</div>
+        <div>Deadline ${esc(o.deadline)} ${o.overdue?'<span class="pill bad">Overdue</span>':['Completed','Rejected'].includes(o.status)?'':`<span class="pill">${o.days_left}d left</span>`}</div>${link(o.link,'Open link')}
+        <div class="row"><select data-s="${o.id}" style="width:auto">${STATUS.map(s=>`<option ${s==o.status?'selected':''}>${s}</option>`).join('')}</select>
+        <button class="ghost" data-h="${o.id}">History</button><button class="ghost" data-e="${o.id}">Edit</button><button class="ghost danger" data-d="${o.id}">Delete</button></div></div>`).join('')}</div>`
+        :'<div class="empty">No opportunities match. Save internships, hackathons, workshops or courses and track each application.</div>';
+      L.querySelectorAll('[data-s]').forEach(s=>s.onchange=async()=>{try{await api('/opportunities/'+s.dataset.s,'PATCH',{status:s.value});toast('Status updated')}catch(e){toast(e.message)}load()});
+      L.querySelectorAll('[data-h]').forEach(b=>b.onclick=async()=>{const h=await api(`/opportunities/${b.dataset.h}/history`);alert(h.map(x=>`${x.changed_at.replace('T',' ').slice(0,16)}  ${x.old_status||'—'} → ${x.new_status}`).join('\n'))});
+      L.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{const o=os.find(x=>x.id==b.dataset.e);form('Edit',OPP,o,async d=>{await api('/opportunities/'+o.id,'PATCH',d);load()})});
+      L.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{if(confirm('Delete?')){await api('/opportunities/'+b.dataset.d,'DELETE');load()}});
+    }catch(e){showErr(L,e,load)}};
+  ['ft','fs','so','ov'].forEach(i=>$('#'+i).onchange=load);
+  $('#add').onclick=()=>form('Add opportunity',OPP,{type:'Internship'},async d=>{await api('/opportunities','POST',d);toast('Saved');load()});
+  load();
+}
+// ---- profile + portfolio ----
+async function portfolio(){
+  loading();
+  try{const [p,me]=await Promise.all([api('/portfolio'),api('/me')]);
+    main.innerHTML=`<div class="bar"><h2>Portfolio</h2><button class="ghost" id="ep">Edit profile</button><button class="ghost" id="cp">Copy text</button><a href="/api/portfolio/pdf"><button>Download PDF</button></a></div>
+    <p class="muted">Preview of what others see. Your email, opportunities and activity are never included.</p><pre>${esc(p.text)}</pre>
+    <div class="card"><b>Share link</b> <span class="muted">(anyone with the link can read the text above)</span>
+    <div class="row">${p.share_url?`<input readonly value="${esc(location.origin+p.share_url)}"><button class="ghost danger" id="sh0">Stop sharing</button>`:'<button id="sh1">Create share link</button>'}</div></div>`;
+    $('#cp').onclick=()=>navigator.clipboard.writeText(p.text).then(()=>toast('Copied'));
+    if($('#sh1'))$('#sh1').onclick=async()=>{await api('/share','POST',{enabled:true});portfolio()};
+    if($('#sh0'))$('#sh0').onclick=async()=>{await api('/share','POST',{enabled:false});portfolio()};
+    $('#ep').onclick=()=>form('Edit profile',[['name','Name','text'],['headline','Headline','text'],['bio','Bio','textarea'],['location','Location','text'],['website','Website','url']],me,async d=>{await api('/profile','PUT',d);toast('Profile saved');portfolio()});
+  }catch(e){showErr(main,e,portfolio)}
+}
+// ---- navigation + auth ----
+const VIEWS={dashboard,skills:()=>crudView('skills'),projects:()=>crudView('projects'),certificates:()=>crudView('certificates'),goals,opportunities:opps,portfolio};
+function nav(v){document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));VIEWS[v]()}
+$('#nav').innerHTML=Object.keys(VIEWS).map(v=>`<button data-v="${v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join('');
+$('#nav').onclick=e=>e.target.dataset.v&&nav(e.target.dataset.v);
+let reg=false;
+function showAuth(){$('#app').hidden=true;$('#auth').hidden=false}
+$('#swap').onclick=()=>{reg=!reg;$('#nameWrap').hidden=!reg;$('#atitle').textContent=reg?'Create account':'Sign in';$('#swap').textContent=reg?'I have an account':'Create account'};
+$('#af').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));$('#aerr').textContent='';
+  try{await api(reg?'/register':'/login','POST',f);start()}catch(er){$('#aerr').textContent=Object.values(er.fields||{}).join(' · ')||er.message}};
+$('#out').onclick=async()=>{await api('/logout','POST');showAuth()};
+async function start(){try{const me=await api('/me');$('#who').textContent=me.name;$('#auth').hidden=true;$('#app').hidden=false;nav('dashboard')}catch{showAuth()}}
+start();
+</script></body></html>
