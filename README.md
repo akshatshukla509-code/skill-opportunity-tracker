@@ -43,5 +43,3 @@ Ownership on every query (other users get 404) | URL validation (http/https only
 - "Overdue" uses the server's date; PDF uses a basic text layout
 - Sample data only. Never commit `tracker.db` or `.secret_key` (already git-ignored)
 
-## Contribution statement
-Replace this paragraph with your own: what you designed, built and tested, and which AI tools you used for what.
